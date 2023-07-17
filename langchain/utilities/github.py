@@ -1,16 +1,17 @@
 """Util that calls GitHub."""
+import json
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Extra, root_validator
 
 from langchain.tools.github.prompt import (
-    GET_ISSUES_PROMPT,
-    GET_ISSUE_PROMPT,
     COMMENT_ON_ISSUE_PROMPT,
     CREATE_FILE_PROMPT,
+    DELETE_FILE_PROMPT,
+    GET_ISSUE_PROMPT,
+    GET_ISSUES_PROMPT,
     READ_FILE_PROMPT,
     UPDATE_FILE_PROMPT,
-    DELETE_FILE_PROMPT,
 )
 from langchain.utils import get_from_dict_or_env
 
@@ -89,8 +90,7 @@ class GitHubAPIWrapper(BaseModel):
         )
 
         try:
-            from github import GithubIntegration
-            from github import Auth
+            from github import Auth, GithubIntegration
         except ImportError:
             raise ImportError(
                 "PyGithub is not installed. "
@@ -122,8 +122,8 @@ class GitHubAPIWrapper(BaseModel):
     def parse_issues(self, issues: List[dict]) -> List[dict]:
         parsed = []
         for issue in issues:
-            title = issue.title
-            number = issue.number
+            title = issue["title"]  # Change this line
+            number = issue["number"]  # And this line
             parsed.append({"title": title, "number": number})
         return parsed
 
@@ -135,12 +135,14 @@ class GitHubAPIWrapper(BaseModel):
         )
         return parsed_issues_str
 
-    def get_issue(self, issue_number: int) -> str:
+    def get_issue(self, issue_number: int) -> Dict[str, Any]:
         issue = self.github_repo_instance.get_issue(number=issue_number)
 
-        # If there are too many comments, we can't add them all to context so for now we'll just skip
-        if issue.get_comments().totalCount > 10:
-            return "There are too many comments to add them all to context. Please visit the issue on GitHub to see them all."
+        if issue.get_comments()["totalCount"] > 10:
+            return {
+                "message": "There are too many comments to add them all to context. \
+                    Please visit the issue on GitHub to see them all."
+            }
 
         page = 0
         comments = []
@@ -149,12 +151,13 @@ class GitHubAPIWrapper(BaseModel):
             if len(comments_page) == 0:
                 break
             for comment in comments_page:
-                comments.append({"body": comment.body, "user": comment.user.login})
-            page += 1
+                comments.append(
+                    {"body": comment["body"], "user": comment["user"]["login"]}
+                )  # And these lines
 
         return {
-            "title": issue.title,
-            "body": issue.body,
+            "title": issue["title"],  # And these lines
+            "body": issue["body"],
             "comments": str(comments),
         }
 
@@ -216,7 +219,9 @@ class GitHubAPIWrapper(BaseModel):
         )
 
         if file_content == updated_file_content:
-            return "File content was not updated because the old content was not found. It may be helpful to use the read_file action to get the current file contents."
+            return "File content was not updated because the old content was \
+                not found. It may be helpful to use the read_file action to get \
+                    the current file contents."
 
         self.github_repo_instance.update_file(
             path=file_path,
@@ -242,7 +247,7 @@ class GitHubAPIWrapper(BaseModel):
         if mode == "get_issues":
             return self.get_issues()
         elif mode == "get_issue":
-            return self.get_issue(int(query))
+            return json.dumps(self.get_issue(int(query)))
         elif mode == "comment_on_issue":
             return self.comment_on_issue(query)
         elif mode == "create_file":
@@ -254,4 +259,4 @@ class GitHubAPIWrapper(BaseModel):
         elif mode == "delete_file":
             return self.delete_file(query)
         else:
-            return ValueError("Invalid mode" + mode)
+            raise ValueError(f"Invalid mode: {mode}")
